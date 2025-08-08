@@ -5,7 +5,8 @@ from datetime import datetime
 
 import streamlit as st
 from PIL import Image
-
+from pathlib import Path  # <-- ensure this is imported at top-level
+import re  
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from openai import AzureOpenAI
@@ -119,7 +120,7 @@ def to_download_bytes(data: dict) -> bytes:
 tab1, tab2, tab3 = st.tabs([
     "Tab 1: OCR → JSON",
     "Tab 2: JSON → Placeholder JSON",
-    "Tab 3: (placeholder)"
+    "Tab 3: Final Template"
 ])
 
 # ===========================
@@ -313,6 +314,85 @@ Return only the JSON object.
     else:
         st.info("Upload the `quiz_structured_*.json` produced in Tab 1.")
 
-
 with tab3:
-    st.info("Another placeholder tab (e.g., Settings, About).")
+    st.subheader("Merge placeholders JSON + HTML template")
+    st.caption("Upload the flat placeholders JSON (from Tab 2) and your AMP HTML template. I’ll fill {{keys}} and return a final HTML.")
+
+    # --- Helpers (scoped here; move to top if you prefer) ---
+    def build_attr_value(key: str, val: str) -> str:
+        """
+        key example: s2option3attr
+        val example: "correct" or "" (empty)
+        returns: "option-3-correct" or ""
+        """
+        if not key.endswith("attr") or not val:
+            return ""
+        m = re.match(r"s(\d+)option(\d)attr$", key)
+        if m and val.strip().lower() == "correct":
+            opt = m.group(2)
+            return f"option-{opt}-correct"
+        return val
+
+    def fill_template(template: str, data: dict) -> str:
+        # Precompute rendered values, handling *attr keys specially
+        rendered = {}
+        for k, v in data.items():
+            if k.endswith("attr"):
+                rendered[k] = build_attr_value(k, str(v))
+            else:
+                rendered[k] = "" if v is None else str(v)
+
+        # Replace both {{key}} and {{key|safe}}
+        html = template
+        for k, v in rendered.items():
+            html = html.replace(f"{{{{{k}}}}}", v)
+            html = html.replace(f"{{{{{k}|safe}}}}", v)
+        return html
+
+    # --- Uploaders ---
+    c1, c2 = st.columns(2)
+    with c1:
+        up_json = st.file_uploader("📎 Upload placeholders JSON", type=["json"], key="tab3_json")
+    with c2:
+        up_tpl = st.file_uploader("📎 Upload HTML template", type=["html", "htm"], key="tab3_tpl")
+
+    build = st.button("🛠️ Build, Save & Preview", disabled=not (up_json and up_tpl))
+
+    if build and up_json and up_tpl:
+        # Load files
+        try:
+            data = json.loads(up_json.getvalue().decode("utf-8"))
+        except Exception as e:
+            st.error(f"Invalid JSON: {e}")
+            st.stop()
+
+        try:
+            template_html = up_tpl.getvalue().decode("utf-8")
+        except Exception as e:
+            st.error(f"Couldn't read template HTML: {e}")
+            st.stop()
+
+        # Merge
+        final_html = fill_template(template_html, data)
+
+        # ✅ Save with timestamp: final_quiz_YYYYMMDD_HHMMSS.html
+        ts_name = f"final_quiz_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        Path(ts_name).write_text(final_html, encoding="utf-8")
+
+        st.success(f"✅ HTML generated and saved as **{ts_name}**")
+
+        with st.expander("🔍 HTML Preview (source)"):
+            st.code(final_html[:120000], language="html")  # cap preview for performance
+
+        # Download button (uses the same timestamped name)
+        st.download_button(
+            "⬇️ Download final HTML",
+            data=final_html.encode("utf-8"),
+            file_name=ts_name,
+            mime="text/html"
+        )
+
+        st.info("Note: AMP pages might not render inside Streamlit due to sandboxing/CSP. Download and open in a browser or your hosting pipeline.")
+    elif not (up_json and up_tpl):
+        st.info("Please upload BOTH files to enable the Build button.")
+
