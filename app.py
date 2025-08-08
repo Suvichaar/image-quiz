@@ -190,12 +190,129 @@ with tab1:
 - Never commit secrets to GitHub; use Streamlit secrets.
             """
         )
-
 # ===========================
-# Placeholders (optional)
+# ✅ Tab 2: JSON → Web Story Placeholders
 # ===========================
 with tab2:
-    st.info("Add whatever you want here later (e.g., Batch processing, History).")
+    st.subheader("JSON → Web Story Placeholders")
+
+    st.caption("Upload the structured questions JSON from Tab 1 (key: `questions`) and I’ll flatten it into web-story placeholders.")
+
+    uploaded_json = st.file_uploader("📎 Upload ‘quiz_structured_*.json’", type=["json"], key="tab2_uploader")
+
+    if uploaded_json:
+        # Read & preview input JSON
+        try:
+            questions_data = json.loads(uploaded_json.getvalue().decode("utf-8"))
+        except Exception as e:
+            st.error(f"Invalid JSON file: {e}")
+            st.stop()
+
+        with st.expander("👀 Input Preview"):
+            st.code(json.dumps(questions_data, ensure_ascii=False, indent=2)[:4000], language="json")
+
+        # ---- System prompt (same mapping rules you shared) ----
+        SYSTEM_PROMPT_TAB2 = """
+You are given a JSON object with key "questions": a list where each item has:
+- question (string)
+- options: {"A":..., "B":..., "C":..., "D":...}
+- correct_option (A/B/C/D)
+- each question explanation should be placed with respective attachment#1
+
+Produce a single flat JSON object with EXACTLY these keys. If something isn’t present, choose short sensible defaults (Hindi) rather than leaving it blank:
+
+pagetitle, storytitle, typeofquiz, potraitcoverurl,
+s1title1, s1text1,
+
+s2questionHeading, s2question1,
+s2option1, s2option1attr, s2option2, s2option2attr,
+s2option3, s2option3attr, s2option4, s2option4attr,
+s2attachment1,
+
+s3questionHeading, s3question1,
+s3option1, s3option1attr, s3option2, s3option2attr,
+s3option3, s3option3attr, s3option4, s3option4attr,
+s3attachment1,
+
+s4questionHeading, s4question1,
+s4option1, s4option1attr, s4option2, s4option2attr,
+s4option3, s4option3attr, s4option4, s4option4attr,
+s4attachment1,
+
+s5questionHeading, s5question1,
+s5option1, s5option1attr, s5option2, s5option2attr,
+s5option3, s5option3attr, s5option4, s5option4attr,
+s5attachment1,
+
+s6questionHeading, s6question1,
+s6option1, s6option1attr, s6option2, s6option2attr,
+s6option3, s6option3attr, s6option4, s6option4attr,
+s6attachment1,
+
+results_bg_image, results_prompt_text, results1_text, results2_text, results3_text
+
+Mapping rules:
+- sNquestion1 ← questions[N-2].question  (N=2..6)
+- sNoption1..4 ← options A..D text
+- For the correct option, set sNoptionKattr to the **string** "correct"; for others set "".
+- sNattachment1 ← explanation for that question
+- sNquestionHeading ← "प्रश्न {N-1}"
+- pagetitle/storytitle: derive short, relevant Hindi titles from the overall content.
+- typeofquiz: set "शैक्षिक" if unknown.
+- s1title1: a 2–5 word intro title; s1text1: 1–2 sentence intro.
+- results_*: short friendly Hindi strings. results_bg_image: "" if none.
+
+Return only the JSON object.
+        """.strip()
+
+        with st.spinner("🧩 Generating placeholders with GPT..."):
+            try:
+                resp = gpt_client.chat.completions.create(
+                    model=GPT_DEPLOYMENT,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_TAB2},
+                        {"role": "user",   "content": json.dumps(questions_data, ensure_ascii=False)}
+                    ],
+                )
+                content = resp.choices[0].message.content
+                content = clean_model_json(content)
+                try:
+                    placeholders = json.loads(content)
+                except json.JSONDecodeError:
+                    # salvage first JSON block if code fences/noise present
+                    m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+                    if not m:
+                        raise
+                    placeholders = json.loads(m.group(0))
+
+            except Exception as e:
+                st.error(f"GPT failed: {e}")
+                st.stop()
+
+        st.success("✅ Placeholders ready!")
+        st.subheader("Flat Placeholder JSON")
+        st.json(placeholders)
+
+        fname = f"quiz_placeholders_flat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        st.download_button(
+            "⬇️ Download placeholders JSON",
+            data=json.dumps(placeholders, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=fname,
+            mime="application/json"
+        )
+
+        with st.expander("ℹ️ Notes"):
+            st.markdown(
+                """
+- Input must include `questions` with options A–D and `correct_option`.
+- The correct option’s `*attr` field becomes `"correct"`; others are empty strings.
+- Headings auto-fill as **प्रश्न 1..5**; intro/results fields get short Hindi defaults if missing.
+                """
+            )
+    else:
+        st.info("Upload the `quiz_structured_*.json` produced in Tab 1.")
+
 
 with tab3:
     st.info("Another placeholder tab (e.g., Settings, About).")
