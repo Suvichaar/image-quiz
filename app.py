@@ -118,7 +118,7 @@ def to_download_bytes(data: dict) -> bytes:
 # ===========================
 tab1, tab2, tab3 = st.tabs([
     "Tab 1: OCR → JSON",
-    "Tab 2: (placeholder)",
+    "Tab 2: JSON → Placeholder JSON",
     "Tab 3: (placeholder)"
 ])
 
